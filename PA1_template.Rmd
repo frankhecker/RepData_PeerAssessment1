@@ -5,21 +5,260 @@ output:
     keep_md: true
 ---
 
-
 ## Loading and preprocessing the data
 
+I carried out the analysis for this project using
+`r version$version.string`; I used the
+[dplyr](http://cran.r-project.org/web/packages/dplyr) package for data
+analysis and the
+[ggplot2](http://cran.r-project.org/web/packages/ggplot2) package for
+plotting. (I also used the `md5sum` function in the tools package in
+core R, and the `date_format` function in the
+[scales](http://cran.r-project.org/web/packages/scales) package. For
+complete information on the R environment I used please see the
+Appendix below.)
 
+First, I loaded the necessary libraries; note that the dplyr package
+masks some functions from other packages, so I suppressed any warnings
+resulting from such conflicts.
 
-## What is mean total number of steps taken per day?
+```{r}
+library("dplyr", warn.conflicts = FALSE)
+library("ggplot2")
+library("tools")
+library("scales")
+```
 
+The raw data for this project was included in Roger Peng's original
+repository in the form of a file `activity.zip`. In order to ensure
+that I was working with the correct data, I first computed the MD5
+hash of this file and compared it to the known value I previously
+computed against the file as cloned from the original GitHub
+repository.
 
+```{r}
+activityMD5 <- "61e0c1f8c4a736ff1ab0f8863344b301"
+stopifnot(md5sum("activity.zip") == activityMD5)
+```
+
+I then extracted the CSV file `activity.csv` and read the data into a
+data frame; I used `tbl_df` to convert it into a tbl object (a dplyr
+construct) for convenience in printing the data:
+
+```{r}
+unzip("activity.zip")
+activity <- tbl_df(read.csv("activity.csv", stringsAsFactors = FALSE))
+activity
+```
+
+The `activity` data frame contains `r nrow(activity)` observations of
+three variables:
+
+* `date`: The date of each observation, in the form "YYYY-MM-DD".
+* `interval`: The 5-minute interval during the day during which the
+  number of steps was recorded, expressed as 100 * H + M, where H
+  is the hour from 0 to 23, and S is the starting minute of the
+  interval within the hour, from 0 to 55.
+* `steps`: The number of steps recorded during the given interval
+  (missing for some observations and recorded as NA).
+
+## What is the mean total number of steps taken per day?
+
+As an initial calculation of the mean total number of steps per day I
+took the sum of the steps recorded for all observations (ignoring
+observations for which the number of steps was missing) and then
+divided by the number of days for which there are records in the data:
+
+```{r}
+totalSteps <- sum(activity$steps, na.rm = TRUE)
+totalDays <- length(unique(activity$date))
+avgSteps <- totalSteps / totalDays
+avgSteps
+```
+
+The average of `r round(avgSteps, 2)` steps per day reflects the
+`r totalDays` days for which records exist in the data. However note
+that this value will be misleading if there are any days for which
+there are records in the data but no values were actually recorded for
+the number of steps.
+
+To address this issue I calculated the number of days for which there
+was at least one observation:
+
+```{r}
+recordedDays <- activity %>%
+        group_by(date) %>%
+        summarise(totalObs = sum(!is.na(steps))) %>%
+        filter(totalObs > 0) %>%
+        nrow()
+recordedDays
+```
+
+I then recalculated the mean total steps per day for the
+`r recordedDays` days for which at least some activity
+data were recorded:
+
+```{r}
+avgSteps <- totalSteps / recordedDays
+avgSteps
+```
+
+Because there were fewer days on which any data were actually
+recorded, the new average was higher than the previously-calculated
+average. (Incidentally, note that the subject averaged more than the
+recommended 10,000 steps per day.)
 
 ## What is the average daily activity pattern?
 
+Each day's observations reflect the subject's activity during that
+day. To get a sense for what an average day looks like, I grouped the
+observations for each 5-minute interval and took the mean number of
+steps for that interval across all days (ignoring any missing values).
 
+```{r}
+avgActivity <- activity %>%
+        group_by(interval) %>%
+        summarise(steps = mean(steps, na.rm = TRUE))
+avgActivity
+```
+
+I plotted the resulting data frame to get a picture of a typical day's
+activity. In order to make the plot more understandable I used the
+interval values to compute actual times in POSIX format. This required
+first converting the interval values to seconds since midnight, and
+then converting the seconds values to POSIX times on an
+arbitrarily-chosen date. (This date is independent of the dates of the
+observations, and is ignored for purposes of plotting; it's there only
+because a POSIX time has to include a date component.) 
+
+```{r}
+avgActivity <- avgActivity %>%
+        mutate(time = 3600 * interval %/% 100 + 60 * interval %% 100) %>%
+        mutate(time = as.POSIXct(time, origin = "1960-01-01", tz = "GMT"))
+avgActivity
+```
+
+As a result the actual plot shows the times of day on the x axis in
+hours and minutes:
+
+```{r}
+p <- ggplot(avgActivity, aes(x = time, y = steps))
+p <- p + geom_line()
+p <- p + scale_x_datetime(labels = date_format(format = "%H:%M"))
+p <- p + xlab("Time of Day")
+p <- p + ylab("Steps Per 5-Minute Interval")
+p <- p + ggtitle("Average Daily Activity")
+print(p)
+```
+
+Note that on a typical day the subject's activity rapidly increases
+when they wake up around 6 am, reaches a peak just before 9 am, and
+then fluctuates through the remainder of the morning and afternoon
+before declining past 9 pm as bedtime approaches.
 
 ## Imputing missing values
 
+Some days have no recorded observations at all (for example, October
+1, 2012), while others may be missing observations for some intervals
+during the day. In cases where a value is missing for a particular
+interval I imputed the missing value using the average number of steps
+for that interval across all days.
 
+Note that this imputation method assumes that for each interval there
+is at least one day for which an observation was recorded during that
+interval. To double-check this, I grouped the original data by
+intervals again, computed the total number of observations recorded
+for each interval, and counted the number of intervals for which no
+observations were recorded. There should be no such cases.
+
+```{r}
+unrecordedIntervals <- activity %>%
+        group_by(interval) %>%
+        summarise(totalObs = sum(!is.na(steps))) %>%
+        filter(totalObs == 0) %>%
+        nrow()
+stopifnot(unrecordedIntervals == 0)
+```
+
+I then did the imputation itself. To do this I used the `mutate`
+function of the dplyr package to change the values of the `steps`
+variable for all observations. I computed the new value using the
+`ifelse` function: If the particular value of the `steps` variable was
+NA then I set the new value to be the mean of all values of `steps`
+for that interval (since I grouped based on the `interval` variable);
+otherwise I set the new value to be the same as the original value.
+
+```{r}
+imputedData <- activity %>%
+        group_by(interval) %>%
+        mutate(steps = ifelse(is.na(steps), mean(steps, na.rm = TRUE), steps))
+imputedData
+```
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+To analyze the differences between activity patterns on weekdays
+versus weekends I first tagged all observations according to whether
+they were recorded on weekdays or on weekends. (Note that this
+required first converting the `date` variable to have POSIX date
+values.)
+
+```{r}
+weekendDays <- c("Saturday", "Sunday")
+activity <- activity %>%
+        mutate(date = as.POSIXct(date, tz = "GMT")) %>%
+        mutate(Period = ifelse(weekdays(date) %in% weekendDays,
+                               "Weekends", "Weekdays"))
+activity
+```
+
+Then I computed the average activity for weekend days and for
+weekdays. This was similar to how I previously computed the average
+activity for all days, except that I grouped the data by both `Period`
+and `interval` in order to create separate sets of interval means for
+weekdays versus weekends.
+
+```{r}
+avgActivity <- activity %>%
+        group_by(Period, interval) %>%
+        summarise(steps = mean(steps, na.rm = TRUE))
+```
+
+I again converted the interval values into times of the day for a more
+readable plot:
+
+```{r}
+avgActivity <- avgActivity %>%
+        mutate(time = 3600 * interval %/% 100 + 60 * interval %% 100) %>%
+        mutate(time = as.POSIXct(time, origin = "1960-01-01", tz = "GMT"))
+avgActivity
+```
+
+and then plotted the data:
+
+```{r}
+p <- ggplot(avgActivity,
+            aes(x = time, y = steps, group = Period, color = Period))
+p <- p + geom_line()
+p <- p + scale_x_datetime(labels = date_format(format = "%H:%M"))
+p <- p + xlab("Time of Day")
+p <- p + ylab("Steps Per 5-Minute Interval")
+p <- p + ggtitle("Average Daily Activity on Weekdays and Weekends")
+print(p)
+```
+
+Note that on weekends the subject's activity doesn't increase
+significantly until after 8 am (versus about 6 am on weekdays),
+presumably because they wake up later than on weekdays. During the day
+the subject is more active on weekends than on weekdays. Finally, on
+weekends the subject's activity peaks later in the evening, presumably
+reflecting a later bedtime.
+
+## Appendix
+
+I used the following R environment in doing the analysis for this
+project:
+
+```{r}
+sessionInfo()
+```
