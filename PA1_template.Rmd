@@ -9,7 +9,7 @@ output:
     ]
 ---
 
-## Loading and preprocessing the data
+## Introduction
 
 I carried out the analysis for this project using
 `r version$version.string`; I used the
@@ -22,16 +22,28 @@ core R, and the `date_format` function in the
 complete information on the R environment I used please see Appendix
 2 below.
 
-I first loaded the necessary libraries; note that the dplyr package
-masks some functions from other packages, so I suppressed any warnings
-resulting from such conflicts.
+I first loaded the additional libraries needed for this project; the
+dplyr package masks some functions from other packages, so I
+suppressed any warnings resulting from such conflicts. Also, the plyr
+and dplyr packages can conflict with one another, so I first unloaded
+the plyr package if it was loaded.
 
 ```{r load_data}
+if ("package:plyr" %in% search()) detach("package:plyr", unload = TRUE)
 library("dplyr", warn.conflicts = FALSE)
 library("ggplot2")
 library("tools")
 library("scales")
 ```
+
+I used the dplyr package because it provides a consistent vocabulary
+for actions taken during analysis and for the overall processing
+pipeline. For a quick overview see "[Introduction to
+dplyr](http://cran.rstudio.com/web/packages/dplyr/vignettes/introduction.html)".
+Note that the idiom `d %>% f(x)` is equivalent to `f(d, x)`; see the
+section "Chaining" in "Introduction to dplyr".
+
+## Loading and preprocessing the data
 
 The raw data for this project was included in Roger Peng's original
 repository in the form of a file `activity.zip`. In order to ensure
@@ -64,10 +76,19 @@ As displayed by the `str` function, the `activity` data frame contains
 * `steps`: The number of steps recorded during the given interval
   (missing for some observations and recorded as NA).
 
+In order to carry out the analysis of weekdays versus weekends below,
+I also converted the `date` variable to POSIX time format:
+
+```{r date_convert}
+activity <- activity %>%
+        mutate(date = as.POSIXct(date, tz = "GMT"))
+str(activity)
+```
+
 ## What is the mean total number of steps taken per day?
 
-In order to present a histogram of the data I first calculated the total
-number of steps for each day, ignoring missing values:
+In order to present a histogram of the data I first calculated the
+total number of steps for each day, ignoring missing values:
 
 ```{r steps_per_day}
 dailySteps <- activity %>%
@@ -77,7 +98,8 @@ str(dailySteps)
 ```
 
 I then plotted a histogram to show how many days the subject walked a
-certain number of steps:
+certain number of steps; I set the limits on the y axis to be
+consistent with those on a second histogram below:
 
 ```{r steps_histogram}
 p <- ggplot(dailySteps, aes(x = steps))
@@ -88,32 +110,33 @@ p <- p + ylab("Number of Days")
 print(p)
 ```
 
-Note that several days recorded zero steps; this could be either because
-the subject didn't walk at all that day, or because no values were recorded
-for that day. (Since I ignored missing values in computing the sum above,
-a day for which all intervals had values of NA would result in a sum of
-zero steps.)
+Several days recorded zero or very few steps; this could be either
+because the subject didn't walk much at all that day, or because few
+or no values were recorded for that day. (Since I ignored missing
+values in computing the sum above, a day for which all intervals had
+values of NA would result in a sum of zero steps.)
 
-I then calculated the mean and median; note that using
-`na.rm = TRUE` was really not necessary since based on the above
-computation `dailySteps$steps` would always have a value (which
-might be zero if all `steps` values for a day were missing):
+I then calculated the mean and median; using `na.rm = TRUE` was not
+really necessary since based on the above computation
+`dailySteps$steps` would always have a value (which might be zero if
+all `steps` values for a day were missing):
 
 ```{r mean_median}
 mean(dailySteps$steps, na.rm = TRUE)
 median(dailySteps$steps, na.rm = TRUE)
 ```
 
-Note that although the histogram's peak was around 10,000 steps per day
-the mean was brought down because of the large number of days with
-zero steps. (The median is less sensitive to this effect.)
+Although the histogram's peak was around 10,000 steps per day the mean
+was brought down because of the large number of days with zero (or
+almost zero) steps. The median is less sensitive to this effect.
 
 ## What is the average daily activity pattern?
 
 Each day's observations reflect the subject's activity during that
 day. To get a sense for what an average day looks like, I grouped the
-observations for each 5-minute interval and took the average number of
-steps for that interval across all days (ignoring any missing values).
+observations for each 5-minute interval and calculated the average
+number of steps for that interval across all days (ignoring any
+missing values).
 
 ```{r avgActivity}
 avgActivity <- activity %>%
@@ -128,26 +151,21 @@ I then plotted the average number of steps for each interval:
 p <- ggplot(avgActivity, aes(x = interval, y = steps))
 p <- p + geom_line()
 p <- p + xlab("5-Minute Interval")
-p <- p + ylab("Steps Per Interval")
+p <- p + ylab("Steps")
 p <- p + ggtitle("Average Daily Activity")
 print(p)
 ```
 
 From the above graph the interval with the most number of steps on
-average appeared to be somewhere between 800 and 900. I used the `top_n`
-function of the dplyr package to determine the exact interval with the
-highest average number of steps:
+average appeared to be somewhere between 800 and 900. I used the
+`top_n` function of the dplyr package to determine the specific
+interval with the highest average number of steps:
 
 ```{r top_interval}
 top_n(avgActivity, 1, steps)
 ```
 
-Although it was not required for the project, I decided to do a second
-plot for this step in order to make the graph more understandable, as
-well as more correct. (In particular, the interval values in the above
-graph are not evenly spread out on the x axis; for example, for the
-first hour of the day they go 45, 50, 55, and then jump straight to
-100.) See Appendix 1 for this alternative plot.
+See Appendix 1 for an alternative way to plot this data.
 
 ## Imputing missing values
 
@@ -155,15 +173,14 @@ Out of the `r nrow(activity)` rows in the `activity` data frame, I
 calculated the number of missing values (rows with an NA value for
 `steps`) as follows:
 
-```{r}
+```{r missing_values}
 sum(is.na(activity$steps))
 ```
 
-Although it's not required for the project, note also that I found
-the number of days for which all values were missing, by counting
-the number of observations for each day that had a valid value for
-`steps` and then counting the number of days with zero valid
-observations:
+(Although it's not required for the project, I also found the number
+of days for which all values were missing, by counting the number of
+observations for each day that had a valid value for `steps` and then
+counting the number of days with zero valid observations.)
 
 ```{r missing_days}
 missingDays <- activity %>%
@@ -174,8 +191,8 @@ missingDays <- activity %>%
 missingDays
 ```
 
-In cases where a value was missing for a particular interval I chose to
-impute the missing value using the average number of steps for that
+In cases where a value was missing for a particular interval I chose
+to impute the missing value using the average number of steps for that
 interval across all days.
 
 In particular I used the `mutate` function of the dplyr package to
@@ -194,7 +211,7 @@ imputed <- activity %>%
 
 I then recalculated the average number of steps for each interval
 using the `imputed` data instead of the original `activity` data;
-otherwise the calculation is exactly the same:
+otherwise the calculation was exactly the same:
 
 ```{r imputed_avg}
 dailyImputed <- imputed %>%
@@ -202,7 +219,7 @@ dailyImputed <- imputed %>%
         summarise(steps = sum(steps, na.rm = TRUE))
 ```
 
-and replotted the corresponding histogram:
+I then replotted the corresponding histogram:
 
 ```{r imputed_histogram}
 p <- ggplot(dailyImputed, aes(x = steps))
@@ -214,42 +231,61 @@ p <- p + ggtitle("Average Daily Steps (Missing Values Imputed)")
 print(p)
 ```
 
-I then calculated the mean and median of the new data:
+This new histogram appeared to be identical to the previous
+histogram, except that the number of days with 0-999 steps decreased
+from 10 to 2, while the number of days with 10,000-10,999 steps
+increased from 10 to 18.
+
+Finally, I calculated the mean and median of the new dataset with
+imputed data:
 
 ```{r imputed_mean}
 mean(dailyImputed$steps, na.rm = TRUE)
 median(dailyImputed$steps, na.rm = TRUE)
 ```
 
-Note that this mean was higher, since I had imputed values for
-the `r missingDays` days with no valid observations, which previously contributed
-zero values to the mean. Note also that this
-median was the same as the mean. That's because the values for the
-missing days had been replaced with values corresponding to an
-average day, and thus those days had a correspondingly average total
-number of steps. When sorting the days according to the total number
-of steps the days with all imputed values would have been be in the middle of
-the list, and thus the value they had for the total number of steps
-per day was chosen as the median number of steps per day.
+This mean was higher, since I had imputed values for the
+`r missingDays` days with no valid observations, days that had
+previously contributed zero values to the mean.
+
+Also, this median was the same as the mean. That's because the values
+for every interval on the missing days had been replaced with values
+corresponding to the average of all such intervals, and thus those
+days had a correspondingly average total number of steps.
+
+When sorting the days according to the total number of steps, the days
+with all imputed values ended up in the middle of the list, and thus
+the values of those days for the total number of steps per day was
+chosen as the median number of steps per day. I confirmed this by
+looking at the set of observations around the midpoint:
+
+```{r midpoint_check}
+midpoint <- nrow(dailyImputed) %/% 2
+midpoint
+dailyImputed <- dailyImputed %>% arrange(steps)
+dailyImputed[(midpoint - 6):(midpoint + 6), ]
+```
+
+The entries with value equal to the mean correspond to the days for
+which all values were missing and were imputed.
 
 ## Are there differences in activity patterns between weekdays and weekends?
 
 To analyze the differences between activity patterns on weekdays
 versus weekends I first tagged all observations according to whether
-they were recorded on weekdays or on weekends. (Note that this
-required first converting the `date` variable to have POSIX date
-values.)
+they were recorded on weekdays or on weekends. (This was possible
+since I had previously converted the `date` variable in the `activity`
+data frame to have POSIX date values.)
 
 ```{r tag_days}
 weekendDays <- c("Saturday", "Sunday")
 activity <- activity %>%
-        mutate(date = as.POSIXct(date, tz = "GMT")) %>%
         mutate(period = as.factor(ifelse(weekdays(date) %in% weekendDays,
                                          "weekend", "weekday")))
 str(activity)
 ```
 
-I then computed the average activity for weekend days and for
+I then computed the average activity for weekends and for
 weekdays. This was similar to how I previously computed the average
 activity for all days, except that I grouped the data by both `period`
 and `interval` in order to create separate sets of interval means for
@@ -276,24 +312,29 @@ p <- p + ggtitle("Average Daily Activity on Weekdays and Weekends")
 print(p)
 ```
 
-Although it was not required for the project, I again converted the
-interval values into times of the day for a more readable and accurate
-plot; see Appendix 1.
+See Appendix 1 for an alternative way to plot this data.
 
 ## Appendix 1
 
-As noted above, I wanted to do alternative plots for average daily
-activity that were more understandable and accurate. To do these
-alternative plots I used the interval values to compute actual times
-in POSIX format. This required first converting the interval values to
-seconds since midnight, and then converting the seconds values to
-POSIX times on an arbitrarily-chosen date. (This date is independent
-of the dates of the observations, and is ignored for purposes of
-plotting; it's there only because a POSIX time has to include a date
-component.)
+Although it was not required for the project, I decided to create
+alternative plots for the daily activity and daily activity by
+weekends versus weekdays, in order to make the graphs more
+understandable, as well as more correct. In particular, the interval
+values in the above graphs were not evenly spread out on the x axis;
+for example, for the first hour of the day the interval values went
+from 45 to 50 to 55, and then jumped straight to 100. This led to
+corresponding jumps in the plotted lines.
 
-The first computation is for average daily activity for all days
-combined:
+To create these alternative plots I used the interval values to
+compute actual times in POSIX format. This required first converting
+the interval values to seconds since midnight, and then converting the
+seconds values to POSIX times on an arbitrarily-chosen date. (This
+date was independent of the dates of the observations, and was ignored
+for purposes of plotting; it was there only because a POSIX time has
+to include a date component.)
+
+I first added POSIX time information for the data frame containing the
+average daily activity for all days combined:
 
 ```{r avgActivity_time}
 avgActivity <- avgActivity %>%
@@ -302,8 +343,8 @@ avgActivity <- avgActivity %>%
 str(avgActivity)
 ```
 
-As a result the x axis of the plot shows the actual times of day for each
-interval in terms of hours and minutes:
+The x axis of the resulting plot showed the actual times of day for
+each interval in terms of hours and minutes:
 
 ```{r avgActivity_time_plot}
 p <- ggplot(avgActivity, aes(x = time, y = steps))
@@ -315,13 +356,14 @@ p <- p + ggtitle("Average Daily Activity")
 print(p)
 ```
 
-Note that on a typical day the subject's activity rapidly increases
-when they wake up around 6 am, reaches a peak around 8:30 am, and
-then fluctuates through the remainder of the morning and afternoon
-before declining past 9 pm as bedtime approaches.
+On a typical day the subject's activity rapidly increased when they
+wake up around 6 am, reached a peak around 8:30 am, and then
+fluctuated through the remainder of the morning and afternoon before
+declining past 9 pm as bedtime approached.
 
-The second plot is for average daily activity on weekdays
-vs. weekends. Again I converted the intervals to times of day:
+The second plot was for average daily activity on weekdays versus
+weekends. Again I converted the intervals to times of day, this time
+in the data frame containing the tagged average activity data:
 
 ```{r avgActivityByPeriod_time}
 avgActivityByPeriod <- avgActivityByPeriod %>%
@@ -330,7 +372,7 @@ avgActivityByPeriod <- avgActivityByPeriod %>%
 glimpse(avgActivityByPeriod)
 ```
 
-and then plotted the data with an appropriate x axis:
+I then plotted the data with an appropriate x axis:
 
 ```{r avgActivityByPeriod_time_plot}
 p <- ggplot(avgActivityByPeriod,
@@ -344,12 +386,12 @@ p <- p + ggtitle("Average Daily Activity on Weekdays and Weekends")
 print(p)
 ```
 
-Note that on weekends the subject's activity doesn't increase
-significantly until after 8 am (versus about 6 am on weekdays),
-presumably because they wake up later than on weekdays. During the day
-the subject is more active on weekends than on weekdays. Finally, on
-weekends the subject's activity peaks later in the evening, presumably
-reflecting a later bedtime.
+On weekends the subject's activity didn't increase significantly until
+after 8 am (versus about 6 am on weekdays), presumably because they
+woke up later than on weekdays. During the day the subject was more
+active on weekends than on weekdays. Finally, on weekends the
+subject's activity peaked later in the evening, presumably reflecting
+a later bedtime.
 
 ## Appendix 2
 
